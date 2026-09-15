@@ -189,6 +189,7 @@ export class RoseScene {
 
   // Scene Objects
   private earthGroup: THREE.Group = new THREE.Group();
+  private gardenGroup: THREE.Group = new THREE.Group();
   private stemGroup: THREE.Group = new THREE.Group();
   private stemMesh!: THREE.Mesh;
   private leavesGroup: THREE.Group = new THREE.Group();
@@ -198,6 +199,8 @@ export class RoseScene {
   private petals: PetalData[] = [];
   private floatingDust!: THREE.Points;
   private sparkleDust!: THREE.Points;
+  private starfield!: THREE.Points;
+  private starfieldMat!: THREE.PointsMaterial;
 
   // Timing & Phase
   public currentPhase: RosePhase = 'sprouting';
@@ -231,30 +234,33 @@ export class RoseScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x050106, 1.0);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.45;
+    this.renderer.toneMappingExposure = 1.2;
 
     this.container.appendChild(this.renderer.domElement);
     this.clock = new THREE.Clock();
 
-    // Cinematic post-processing: soft anime-style glow bloom on the emissive
-    // petals & godray, matching the reference photography's luminous highlights.
+    // Cinematic post-processing: a restrained highlight-only glow (like a real
+    // camera's bright-light bloom) on the godray, moonlight and hottest petal
+    // rims only — not a wash over the whole frame.
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(width, height),
-      0.85, // strength
-      0.55, // radius
-      0.32  // threshold
+      0.42, // strength
+      0.38, // radius
+      0.82  // threshold - only the brightest highlights bloom
     );
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
 
     this.setupLighting();
+    this.createGardenBackdrop();
     this.createGodrayBeam();
     this.createSoilAndFallenPetals();
     this.createBotanicalStemAndLeaves();
     this.createBotanicalRosePetals();
     this.createAtmosphericGlowDust();
+    this.createStarfield();
 
     window.addEventListener('resize', this.onResize);
     window.addEventListener('mousemove', this.onMouseMove);
@@ -269,7 +275,7 @@ export class RoseScene {
    */
   private setupLighting() {
     // 1. Soft Warm Ambient
-    this.ambientLight = new THREE.AmbientLight(0x220a1c, 1.3);
+    this.ambientLight = new THREE.AmbientLight(0x1a0815, 0.55);
     this.scene.add(this.ambientLight);
 
     // 2. Heavenly Top-Down Key Light (mimics golden sunlight shining through canopy)
@@ -299,11 +305,84 @@ export class RoseScene {
   }
 
   /**
+   * Blurred jungle/garden backdrop: layered silhouette "trees" and bushes
+   * ringing the scene so the rose reads as sitting inside a garden, not a
+   * void. Deliberately soft/out-of-focus (fog + low detail) like a shallow
+   * depth-of-field cinematic backdrop behind the hero subject.
+   */
+  private createGardenBackdrop() {
+    this.gardenGroup = new THREE.Group();
+
+    const foliageColors = [0x0c2410, 0x123018, 0x0a1c0d, 0x162f14];
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: 0x1a120c,
+      roughness: 0.9,
+    });
+
+    const ringCount = 22;
+    for (let i = 0; i < ringCount; i++) {
+      const angle = (i / ringCount) * Math.PI * 2 + Math.random() * 0.2;
+      const radius = 9.5 + Math.random() * 5.5;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+
+      // Trunk
+      const trunkHeight = 3.5 + Math.random() * 3.5;
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.22, trunkHeight, 6),
+        trunkMat
+      );
+      trunk.position.set(x, trunkHeight / 2 - 0.35, z);
+      this.gardenGroup.add(trunk);
+
+      // Clustered foliage canopy (low-poly blobs read as bushes/trees at a distance)
+      const foliageColor = foliageColors[i % foliageColors.length];
+      const foliageMat = new THREE.MeshStandardMaterial({
+        color: foliageColor,
+        roughness: 0.85,
+        flatShading: true,
+      });
+      const canopyClusters = 2 + Math.floor(Math.random() * 3);
+      for (let c = 0; c < canopyClusters; c++) {
+        const s = 1.4 + Math.random() * 1.6;
+        const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), foliageMat);
+        blob.position.set(
+          x + (Math.random() - 0.5) * 1.6,
+          trunkHeight + Math.random() * 1.2,
+          z + (Math.random() - 0.5) * 1.6
+        );
+        blob.rotation.set(Math.random(), Math.random(), Math.random());
+        this.gardenGroup.add(blob);
+      }
+    }
+
+    // Low garden hedges closer in, filling the gap between soil and treeline
+    const hedgeMat = new THREE.MeshStandardMaterial({
+      color: 0x14330f,
+      roughness: 0.85,
+      flatShading: true,
+    });
+    const hedgeCount = 30;
+    for (let i = 0; i < hedgeCount; i++) {
+      const angle = (i / hedgeCount) * Math.PI * 2 + Math.random() * 0.15;
+      const radius = 6.8 + Math.random() * 1.8;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      const s = 0.5 + Math.random() * 0.6;
+      const hedge = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), hedgeMat);
+      hedge.position.set(x, s * 0.6, z);
+      this.gardenGroup.add(hedge);
+    }
+
+    this.scene.add(this.gardenGroup);
+  }
+
+  /**
    * Creates the divine vertical beam of godray light streaming from above,
    * exactly as seen in reference image dales916_pindown.io_1789481136.jpg!
    */
   private createGodrayBeam() {
-    const geom = new THREE.CylinderGeometry(0.35, 2.8, 10.0, 32, 1, true);
+    const geom = new THREE.CylinderGeometry(0.22, 1.35, 10.0, 32, 1, true);
     geom.translate(0, 4.2, 0);
 
     // Custom gradient alpha shader for the ethereal volumetric sunbeam
@@ -339,7 +418,7 @@ export class RoseScene {
         float shimmer = 0.85 + 0.15 * sin(uTime * 1.5 + vUv.y * 8.0);
 
         vec3 beamColor = mix(vec3(1.0, 0.88, 0.72), vec3(1.0, 0.65, 0.78), vUv.y);
-        float alpha = vertFade * (0.28 + 0.35 * rim) * uIntensity * shimmer;
+        float alpha = vertFade * (0.16 + 0.22 * rim) * uIntensity * shimmer;
 
         gl_FragColor = vec4(beamColor, alpha);
       }
@@ -598,14 +677,20 @@ export class RoseScene {
         layerConf.reflex
       );
 
-      // Glowing velvet material with strong emissive inner translucency
-      const petalMat = new THREE.MeshStandardMaterial({
+      // Velvet petal material: physical clearcoat for a glossy satin sheen
+      // (like real rose petals) plus a faint inner glow — not a flat wash.
+      const petalMat = new THREE.MeshPhysicalMaterial({
         color: layerConf.color,
-        roughness: 0.32,
-        metalness: 0.08,
+        roughness: 0.38,
+        metalness: 0.02,
+        clearcoat: 0.6,
+        clearcoatRoughness: 0.25,
+        sheen: 1.0,
+        sheenColor: new THREE.Color(0xffaec2),
+        sheenRoughness: 0.6,
         side: THREE.DoubleSide,
-        emissive: new THREE.Color(0xff2250),
-        emissiveIntensity: 0.65, // Petal glow!
+        emissive: new THREE.Color(0xff1744),
+        emissiveIntensity: 0.16, // subtle inner warmth, not a glow-out wash
       });
 
       for (let i = 0; i < layerConf.count; i++) {
@@ -737,6 +822,39 @@ export class RoseScene {
     this.scene.add(this.sparkleDust);
   }
 
+  /**
+   * Distant starfield that fades in during the darkness/couplet finale,
+   * turning the void behind the scattered petals into a night sky.
+   */
+  private createStarfield() {
+    const count = 900;
+    const geom = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      // Distribute across a large dome behind/above the scene
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(THREE.MathUtils.lerp(-0.15, 1, Math.random()));
+      const radius = 22 + Math.random() * 10;
+      pos[i * 3] = Math.sin(phi) * Math.cos(theta) * radius;
+      pos[i * 3 + 1] = Math.cos(phi) * radius + 3;
+      pos[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * radius;
+    }
+
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.starfieldMat = new THREE.PointsMaterial({
+      color: 0xdbeafe,
+      size: 0.06,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    this.starfield = new THREE.Points(geom, this.starfieldMat);
+    this.scene.add(this.starfield);
+  }
+
   private onResize = () => {
     if (!this.container || this.isDisposed) return;
     const width = this.container.clientWidth || window.innerWidth;
@@ -777,12 +895,14 @@ export class RoseScene {
     // Reset lights
     this.keyLight.intensity = 3.4;
     this.rimLight.intensity = 4.2;
-    this.ambientLight.intensity = 1.3;
+    this.ambientLight.intensity = 0.55;
     this.roseBloomLight.intensity = 2.8;
     this.silverMoonLight.intensity = 0.0;
     if (this.godrayMesh.material instanceof THREE.ShaderMaterial) {
       this.godrayMesh.material.uniforms.uIntensity.value = 1.0;
     }
+    this.starfieldMat.opacity = 0;
+    this.windStrength = 0;
 
     // Reset petals to bud state
     for (const p of this.petals) {
@@ -807,9 +927,17 @@ export class RoseScene {
       this.godrayMesh.material.uniforms.uTime.value = this.sequenceTime;
     }
 
-    // Smooth camera mouse parallax
+    // Slow cinematic orbit + dolly (subtle, like a real camera crane move)
+    // layered under the mouse parallax so the shot never feels static.
+    const orbitAngle = this.sequenceTime * 0.045;
+    const orbitRadius = 5.8 - Math.min(this.sequenceTime * 0.03, 0.9);
+    const orbitX = Math.sin(orbitAngle) * orbitRadius;
+    const orbitZ = Math.cos(orbitAngle) * orbitRadius;
+
+    // Smooth camera mouse parallax layered on top of the orbit
     this.mouseCurrent.lerp(this.mouseTarget, 0.04);
-    this.camera.position.x = this.mouseCurrent.x * 1.6;
+    this.camera.position.x = orbitX + this.mouseCurrent.x * 1.2;
+    this.camera.position.z = orbitZ;
     this.camera.position.y = 2.2 + this.mouseCurrent.y * 0.8;
     this.camera.lookAt(0, 2.0, 0);
 
@@ -942,13 +1070,16 @@ export class RoseScene {
       const dimFactor = THREE.MathUtils.clamp((explodeT - 0.8) / 2.2, 0, 1);
       this.keyLight.intensity = THREE.MathUtils.lerp(3.4, 0.4, dimFactor);
       this.rimLight.intensity = THREE.MathUtils.lerp(4.2, 0.35, dimFactor);
-      this.ambientLight.intensity = THREE.MathUtils.lerp(1.3, 0.15, dimFactor);
+      this.ambientLight.intensity = THREE.MathUtils.lerp(0.55, 0.1, dimFactor);
       this.roseBloomLight.intensity = THREE.MathUtils.lerp(2.8, 0.5, dimFactor);
       this.silverMoonLight.intensity = THREE.MathUtils.lerp(0.0, 2.6, dimFactor);
 
       if (this.godrayMesh.material instanceof THREE.ShaderMaterial) {
         this.godrayMesh.material.uniforms.uIntensity.value = THREE.MathUtils.lerp(1.0, 0.15, dimFactor);
       }
+
+      // Stars fade in as night falls (garden itself dims via light intensity above)
+      this.starfieldMat.opacity = dimFactor * 0.85;
     }
 
     // Stage 4: DEEP DARKNESS & SHINING SILVER COUPLET (10.0s+)
@@ -969,6 +1100,8 @@ export class RoseScene {
       if (this.godrayMesh.material instanceof THREE.ShaderMaterial) {
         this.godrayMesh.material.uniforms.uIntensity.value = 0.12;
       }
+
+      this.starfieldMat.opacity = 0.85;
 
       // Petals drift with zero-gravity elegance
       for (const p of this.petals) {
