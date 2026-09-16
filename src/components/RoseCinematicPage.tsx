@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { RoseScene, RosePhase } from '../webgl/RoseScene';
 import { NahwDemoTopic, NAHW_DEMO_TOPICS } from '../data/nahwTopics';
 import { GardenAudio } from '../webgl/AudioAmbience';
-import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { ArrowRight, X } from 'lucide-react';
 
 interface RoseCinematicPageProps {
   onBack: () => void;
@@ -18,7 +18,7 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
   const [focusedTopic, setFocusedTopic] = useState<NahwDemoTopic | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<NahwDemoTopic | null>(null);
 
-  const dragState = useRef<{ dragging: boolean; startX: number } | null>(null);
+  const dragState = useRef<{ dragging: boolean; startX: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -39,7 +39,7 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
       setTimeout(() => setShowCouplet(true), 700);
     };
 
-    scene.onCarouselFocusChange = (index) => {
+    scene.onPathFocusChange = (index) => {
       setFocusedTopic(index >= 0 ? NAHW_DEMO_TOPICS[index] : null);
     };
 
@@ -49,43 +49,47 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
     };
   }, [audio]);
 
-  const handleEnterCarousel = useCallback(() => {
+  const handleEnterPath = useCallback(() => {
     setShowCouplet(false);
-    roseSceneRef.current?.enterTopicCarousel();
+    roseSceneRef.current?.enterTopicPath();
   }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (phase !== 'path') return;
-    dragState.current = { dragging: true, startX: e.clientX };
+    dragState.current = { dragging: true, startX: e.clientX, moved: false };
   }, [phase]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (phase !== 'path' || !dragState.current?.dragging) return;
     const dx = e.clientX - dragState.current.startX;
+    if (Math.abs(dx) > 3) dragState.current.moved = true;
     dragState.current.startX = e.clientX;
-    roseSceneRef.current?.dragCarousel(dx * 0.008);
+    roseSceneRef.current?.scrubTopicPath(-dx * 0.0035);
   }, [phase]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (phase !== 'path') return;
-    const wasDragging = dragState.current?.dragging;
+    const wasTap = dragState.current && !dragState.current.moved;
     dragState.current = null;
-    roseSceneRef.current?.releaseCarouselDrag();
 
-    // Treat a near-zero-movement pointer-up as a tap: raycast for the topic.
-    if (wasDragging && containerRef.current) {
+    if (wasTap && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      const topic = roseSceneRef.current?.raycastCarousel(ndcX, ndcY);
+      const topic = roseSceneRef.current?.raycastPath(ndcX, ndcY);
       if (topic) setSelectedTopic(topic);
     }
+  }, [phase]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (phase !== 'path') return;
+    roseSceneRef.current?.scrubTopicPath(e.deltaY * 0.0006);
   }, [phase]);
 
   return (
     <div
       id="rose-cinematic-page"
-      className="relative w-screen h-screen overflow-hidden bg-[#030203] select-none text-neutral-100"
+      className="relative w-screen h-screen overflow-hidden bg-[#0a0704] select-none text-neutral-100"
     >
       {/* 3D WebGL Canvas Viewport */}
       <div
@@ -95,6 +99,7 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onWheel={handleWheel}
         className={`absolute inset-0 w-full h-full ${phase === 'path' ? 'cursor-grab active:cursor-grabbing' : ''}`}
       />
 
@@ -139,7 +144,7 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
             transition={{ duration: 2.4, ease: [0.16, 1, 0.3, 1] }}
             className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center cursor-pointer"
             dir="rtl"
-            onClick={handleEnterCarousel}
+            onClick={handleEnterPath}
           >
             <div className="max-w-4xl mx-auto space-y-7 relative">
               <div className="absolute inset-0 -inset-x-8 bg-radial from-slate-100/10 via-rose-500/5 to-transparent blur-3xl pointer-events-none" />
@@ -157,48 +162,28 @@ export const RoseCinematicPage: React.FC<RoseCinematicPageProps> = ({ onBack, au
         )}
       </AnimatePresence>
 
-      {/* Path phase: minimal focused-topic readout + prev/next controls,
-          navigating the real 3D petal carousel rendered behind. */}
+      {/* Path phase: minimal focused-topic readout, tap the glowing petal
+          underneath (rendered by the 3D scene) to open it. */}
       {phase === 'path' && !showCouplet && (
-        <>
-          <div className="absolute inset-x-0 bottom-10 z-20 flex items-center justify-center gap-6 pointer-events-none">
-            <button
-              id="carousel-prev-button"
-              type="button"
-              onClick={() => roseSceneRef.current?.navigateCarousel(-1)}
-              className="pointer-events-auto p-3 rounded-full border border-neutral-700 bg-black/60 hover:border-rose-400 text-neutral-300 hover:text-white transition-all cursor-pointer"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-
-            <AnimatePresence mode="wait">
-              {focusedTopic && (
-                <motion.button
-                  key={focusedTopic.id}
-                  type="button"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  onClick={() => setSelectedTopic(focusedTopic)}
-                  className="pointer-events-auto flex flex-col items-center gap-1 px-6 py-2.5 rounded-full border border-rose-800/60 bg-black/60 hover:border-rose-400 transition-all cursor-pointer"
-                  dir="rtl"
-                >
-                  <span className="font-arabic text-lg text-rose-100">{focusedTopic.titleArabic}</span>
-                  <span className="text-[10px] font-mono text-neutral-400">{focusedTopic.category}</span>
-                </motion.button>
-              )}
-            </AnimatePresence>
-
-            <button
-              id="carousel-next-button"
-              type="button"
-              onClick={() => roseSceneRef.current?.navigateCarousel(1)}
-              className="pointer-events-auto p-3 rounded-full border border-neutral-700 bg-black/60 hover:border-rose-400 text-neutral-300 hover:text-white transition-all cursor-pointer"
-            >
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </>
+        <div className="absolute inset-x-0 bottom-10 z-20 flex items-center justify-center pointer-events-none">
+          <AnimatePresence mode="wait">
+            {focusedTopic && (
+              <motion.button
+                key={focusedTopic.id}
+                type="button"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                onClick={() => setSelectedTopic(focusedTopic)}
+                className="pointer-events-auto flex flex-col items-center gap-1 px-6 py-2.5 rounded-full border border-rose-800/60 bg-black/60 hover:border-rose-400 transition-all cursor-pointer"
+                dir="rtl"
+              >
+                <span className="font-arabic text-lg text-rose-100">{focusedTopic.titleArabic}</span>
+                <span className="text-[10px] font-mono text-neutral-400">{focusedTopic.category}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
       )}
 
       {/* Selected Topic Detail Card */}
