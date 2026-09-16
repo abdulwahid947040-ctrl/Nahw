@@ -30,6 +30,17 @@ interface PathPetal {
   t: number;
 }
 
+interface StormParticle {
+  active: boolean;
+  spawnDelay: number;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  rot: THREE.Euler;
+  rotVel: THREE.Euler;
+  scale: number;
+  seed: number;
+}
+
 /**
  * Builds one botanical rose-petal surface: a rounded obovate outline (no
  * sharp point at the tip — real rose petals end in a soft curved edge, not
@@ -128,6 +139,42 @@ function createArchPanelGeometry(width: number, height: number): THREE.ExtrudeGe
   return geom;
 }
 
+/**
+ * Small 5-lobed blossom petal (like a cherry/plum blossom petal): rounder
+ * and shorter than a rose petal, with a soft heart-notch tip. Mixed into
+ * the wind gust alongside rose petals so the storm reads as "rose petals +
+ * other blossoms" together, not one repeated petal shape.
+ */
+function createBlossomPetalGeometry(
+  size: number,
+  baseColor: THREE.Color,
+  tipColor: THREE.Color
+): THREE.BufferGeometry {
+  const segments = 18;
+  const geom = new THREE.CircleGeometry(size * 0.5, segments, 0, Math.PI * 1.5);
+  const pos = geom.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const r = Math.sqrt(x * x + y * y) / (size * 0.5);
+    // Gentle cupped bowl + heart-notch dimple near the outer rim.
+    const bowl = -Math.cos(r * Math.PI * 0.5) * 0.06;
+    pos.setZ(i, bowl);
+
+    const t = Math.min(1, r);
+    const c = new THREE.Color().lerpColors(baseColor, tipColor, t);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.computeVertexNormals();
+  return geom;
+}
+
 export class RoseScene {
   private container: HTMLElement;
   private scene: THREE.Scene;
@@ -167,16 +214,15 @@ export class RoseScene {
 
   private stormMesh!: THREE.InstancedMesh;
   private stormCount = 220;
-  private stormData: {
-    active: boolean;
-    spawnDelay: number;
-    pos: THREE.Vector3;
-    vel: THREE.Vector3;
-    rot: THREE.Euler;
-    rotVel: THREE.Euler;
-    scale: number;
-    seed: number;
-  }[] = [];
+  private stormData: StormParticle[] = [];
+
+  // Second mixed-in instanced mesh: smaller blossom petals (different
+  // shape/color from the rose) so the gust reads as "rose petals + other
+  // blossoms" together, not one repeated petal shape.
+  private blossomMesh!: THREE.InstancedMesh;
+  private blossomCount = 140;
+  private blossomData: StormParticle[] = [];
+
   private readonly dummy = new THREE.Object3D();
 
   public readonly flowerHeight = 2.15;
@@ -191,6 +237,7 @@ export class RoseScene {
   private pathTargetT: number = 0;
   private pathFocusIndex: number = -1;
   private pathRaycaster = new THREE.Raycaster();
+  private pathAmbientLight!: THREE.PointLight;
   public onPathFocusChange?: (index: number) => void;
 
   public currentPhase: RosePhase = 'sprouting';
@@ -713,9 +760,34 @@ export class RoseScene {
     this.stormMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.stormMesh.count = 0;
     this.scene.add(this.stormMesh);
+    this.initStormParticles(this.stormData, this.stormCount, this.stormMesh);
 
-    for (let i = 0; i < this.stormCount; i++) {
-      this.stormData.push({
+    // Second, smaller blossom-petal instanced mesh mixed into the same
+    // gust — different geometry/color so the wind reads as a mix of rose
+    // petals and other blossoms, not one repeated shape.
+    const blossomGeom = createBlossomPetalGeometry(
+      0.22,
+      new THREE.Color(0xfff0d8),
+      new THREE.Color(0xffb0c4)
+    );
+    const blossomMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.5,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+      emissive: new THREE.Color(0x7a1030),
+      emissiveIntensity: 0.06,
+    });
+    this.blossomMesh = new THREE.InstancedMesh(blossomGeom, blossomMat, this.blossomCount);
+    this.blossomMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.blossomMesh.count = 0;
+    this.scene.add(this.blossomMesh);
+    this.initStormParticles(this.blossomData, this.blossomCount, this.blossomMesh);
+  }
+
+  private initStormParticles(data: StormParticle[], count: number, mesh: THREE.InstancedMesh) {
+    for (let i = 0; i < count; i++) {
+      data.push({
         active: false,
         spawnDelay: Math.random() * 3.2,
         pos: new THREE.Vector3(),
@@ -727,9 +799,9 @@ export class RoseScene {
       });
       this.dummy.position.set(0, -999, 0);
       this.dummy.updateMatrix();
-      this.stormMesh.setMatrixAt(i, this.dummy.matrix);
+      mesh.setMatrixAt(i, this.dummy.matrix);
     }
-    this.stormMesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   private createAtmosphericGlowDust() {
@@ -790,6 +862,25 @@ export class RoseScene {
   private createTopicPath() {
     this.pathGroup = new THREE.Group();
     this.pathGroup.visible = false;
+
+    // Soft warm-pink ambient ground the petals rest on, matching the
+    // reference image's pink backdrop for the final navigable scene.
+    const groundGeom = new THREE.PlaneGeometry(30, 60);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0xe8b4bc,
+      roughness: 0.85,
+      metalness: 0.0,
+    });
+    const ground = new THREE.Mesh(groundGeom, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(0, -0.01, -18);
+    this.pathGroup.add(ground);
+
+    // Soft pink fill light exclusive to this phase, lightening the screen
+    // from the couplet blackout into a warm pink ambience.
+    this.pathAmbientLight = new THREE.PointLight(0xffc9d6, 0, 14);
+    this.pathAmbientLight.position.set(0, 4, -6);
+    this.pathGroup.add(this.pathAmbientLight);
 
     const n = NAHW_DEMO_TOPICS.length;
     const points: THREE.Vector3[] = [];
@@ -880,6 +971,7 @@ export class RoseScene {
     this.godrayMesh.visible = true;
     this.floatingDust.visible = true;
     this.stormMesh.visible = true;
+    this.blossomMesh.visible = true;
 
     this.keyLight.intensity = 3.0;
     this.rimLight.intensity = 1.8;
@@ -891,7 +983,12 @@ export class RoseScene {
     this.starfieldMat.opacity = 0;
     this.windStrength = 0;
     this.stormMesh.count = 0;
+    this.blossomMesh.count = 0;
     for (const s of this.stormData) {
+      s.active = false;
+      s.spawnDelay = Math.random() * 3.2;
+    }
+    for (const s of this.blossomData) {
       s.active = false;
       s.spawnDelay = Math.random() * 3.2;
     }
@@ -909,6 +1006,7 @@ export class RoseScene {
     this.pathT = 0;
     this.pathTargetT = 0;
     this.pathFocusIndex = -1;
+    this.pathAmbientLight.intensity = 0;
   }
 
   /** Called once the reader taps through the couplet blackout screen. */
@@ -925,15 +1023,19 @@ export class RoseScene {
     this.godrayMesh.visible = false;
     this.floatingDust.visible = false;
     this.stormMesh.visible = false;
+    this.blossomMesh.visible = false;
 
     this.pathGroup.visible = true;
     this.pathT = 0;
     this.pathTargetT = 0;
     this.pathFocusIndex = -1;
 
-    this.ambientLight.intensity = 0.4;
-    this.keyLight.intensity = 1.6;
-    this.rimLight.intensity = 0.8;
+    // Screen lightens from the blackout into a soft warm-pink ambience
+    // matching the reference image, instead of jumping to daylight.
+    this.ambientLight.intensity = 0.3;
+    this.keyLight.intensity = 0;
+    this.rimLight.intensity = 0;
+    this.pathAmbientLight.intensity = 6.5;
   }
 
   /** Scrub the topic path by a normalized delta in roughly [-1, 1] range. */
@@ -961,9 +1063,23 @@ export class RoseScene {
   }
 
   private updatePetalStorm(delta: number, gustEnvelope: number) {
+    this.updateStormSet(this.stormData, this.stormMesh, delta, gustEnvelope, -2.0, 3.2);
+    this.updateStormSet(this.blossomData, this.blossomMesh, delta, gustEnvelope, -3.0, 4.0);
+  }
+
+  /** Drives one set of wind-blown particles (rose petals or blossoms)
+   * spawning from off-screen left and sweeping across in the gust. */
+  private updateStormSet(
+    data: StormParticle[],
+    mesh: THREE.InstancedMesh,
+    delta: number,
+    gustEnvelope: number,
+    depthMin: number,
+    depthMax: number
+  ) {
     let activeCount = 0;
-    for (let i = 0; i < this.stormCount; i++) {
-      const s = this.stormData[i];
+    for (let i = 0; i < data.length; i++) {
+      const s = data[i];
 
       if (!s.active) {
         s.spawnDelay -= delta;
@@ -972,7 +1088,7 @@ export class RoseScene {
           s.pos.set(
             -8 - Math.random() * 3.5,
             this.flowerHeight + (Math.random() - 0.5) * 3.6,
-            THREE.MathUtils.lerp(-2.0, 3.2, Math.random())
+            THREE.MathUtils.lerp(depthMin, depthMax, Math.random())
           );
           s.vel.set(3.0 + Math.random() * 4.2, (Math.random() - 0.5) * 1.0, (Math.random() - 0.5) * 0.9);
           s.rotVel.set((Math.random() - 0.5) * 4.4, (Math.random() - 0.5) * 4.4, (Math.random() - 0.5) * 4.4);
@@ -993,7 +1109,7 @@ export class RoseScene {
         this.dummy.rotation.copy(s.rot);
         this.dummy.scale.setScalar(s.scale * gustEnvelope);
         this.dummy.updateMatrix();
-        this.stormMesh.setMatrixAt(i, this.dummy.matrix);
+        mesh.setMatrixAt(i, this.dummy.matrix);
         activeCount = i + 1;
 
         if (s.pos.x > 9.5) {
@@ -1002,8 +1118,8 @@ export class RoseScene {
         }
       }
     }
-    this.stormMesh.count = activeCount;
-    this.stormMesh.instanceMatrix.needsUpdate = true;
+    mesh.count = activeCount;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   private updateTopicPath(delta: number) {
