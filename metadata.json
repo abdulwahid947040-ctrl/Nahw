@@ -1,0 +1,6 @@
+{
+  "name": "نحو زار",
+  "description": "A cinematic 3D WebGL architectural bas-relief sculpture revealed in chiaroscuro with an interactive fluid lightness overlay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
