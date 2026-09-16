@@ -175,6 +175,32 @@ function createBlossomPetalGeometry(
   return geom;
 }
 
+/**
+ * Generates a soft radial-gradient billboard texture (a blurred glowing
+ * dot) used for foliage clumps — this replaces hard geometric spheres with
+ * a soft, photographic silhouette instead of visible polygon facets.
+ * colorSpace is explicitly set to sRGB to match the renderer's output
+ * color space; leaving it at the Texture default (NoColorSpace) caused the
+ * canvas-drawn colors to render as wrong, washed-out hues.
+ */
+function createSoftDiscTexture(r: number, g: number, b: number, a: number): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, `rgba(${r},${g},${b},${a})`);
+  gradient.addColorStop(0.55, `rgba(${r},${g},${b},${a})`);
+  gradient.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class RoseScene {
   private container: HTMLElement;
   private scene: THREE.Scene;
@@ -369,55 +395,66 @@ export class RoseScene {
       this.courtyardGroup.add(right);
     }
 
-    // Rose hedges lining the outer walkway edges, with small red blooms.
-    const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x203a1c, roughness: 0.85 });
-    const hedgeBloomGeom = createRealisticPetalGeometry(
-      0.16,
-      0.2,
-      0.4,
-      0.15,
-      new THREE.Color(0xff8a3d),
-      new THREE.Color(0x9c1420)
-    );
-    const hedgeBloomMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.5,
-      emissive: new THREE.Color(0x4a0d12),
-      emissiveIntensity: 0.15,
+    // Rose hedges lining the outer walkway edges: soft billboard sprite
+    // clumps (not faceted geometric spheres) so foliage reads as a soft
+    // photographic blur, with small glowing red-bloom sprites mixed in.
+    const hedgeTexture = createSoftDiscTexture(28, 58, 32, 1);
+    const hedgeSpriteMat = new THREE.SpriteMaterial({ map: hedgeTexture, transparent: true, depthWrite: false });
+    const bloomTexture = createSoftDiscTexture(230, 60, 55, 1);
+    const bloomSpriteMat = new THREE.SpriteMaterial({
+      map: bloomTexture,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      opacity: 0.85,
     });
     for (let side = -1; side <= 1; side += 2) {
       for (let i = 0; i < 14; i++) {
         const z = -1 - i * 2.4 + (Math.random() - 0.5);
         const x = side * (2.3 + Math.random() * 0.5);
-        const hedgeGeo = new THREE.SphereGeometry(0.5 + Math.random() * 0.2, 10, 8);
-        const hedge = new THREE.Mesh(hedgeGeo, hedgeMat);
-        hedge.position.set(x, 0.3, z);
-        hedge.scale.y = 0.75;
-        this.courtyardGroup.add(hedge);
+
+        const clumpSize = 3 + Math.floor(Math.random() * 2);
+        for (let c = 0; c < clumpSize; c++) {
+          const hedge = new THREE.Sprite(hedgeSpriteMat);
+          const s = 0.6 + Math.random() * 0.35;
+          hedge.scale.set(s, s * 0.85, 1);
+          hedge.position.set(
+            x + (Math.random() - 0.5) * 0.5,
+            0.28 + Math.random() * 0.28,
+            z + (Math.random() - 0.5) * 0.5
+          );
+          this.courtyardGroup.add(hedge);
+        }
 
         const bloomCount = 3 + Math.floor(Math.random() * 3);
         for (let b = 0; b < bloomCount; b++) {
-          const bloom = new THREE.Mesh(hedgeBloomGeom, hedgeBloomMat);
+          const bloom = new THREE.Sprite(bloomSpriteMat);
+          const s = 0.14 + Math.random() * 0.08;
+          bloom.scale.set(s, s, 1);
           bloom.position.set(
             x + (Math.random() - 0.5) * 0.65,
             0.45 + Math.random() * 0.35,
             z + (Math.random() - 0.5) * 0.65
           );
-          bloom.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
           this.courtyardGroup.add(bloom);
         }
       }
     }
 
-    // Distant soft tree canopy above the colonnade, for depth in the haze.
-    const canopyMat = new THREE.MeshStandardMaterial({ color: 0x33512c, roughness: 0.9 });
+    // Distant soft tree canopy above the colonnade: soft billboard sprites
+    // instead of faceted spheres, so the background silhouette blurs
+    // naturally into the haze.
+    const canopyTexture = createSoftDiscTexture(48, 78, 42, 1);
+    const canopySpriteMat = new THREE.SpriteMaterial({ map: canopyTexture, transparent: true, depthWrite: false });
     for (let i = 0; i < 12; i++) {
       const z = -4 - i * 4.2;
-      const s = 1.8 + Math.random() * 1.3;
-      const left = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), canopyMat);
+      const s = 3.6 + Math.random() * 2.4;
+      const left = new THREE.Sprite(canopySpriteMat);
+      left.scale.set(s, s, 1);
       left.position.set(-8 - Math.random() * 2, 5.5 + Math.random() * 1.3, z);
       this.courtyardGroup.add(left);
-      const right = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), canopyMat);
+      const right = new THREE.Sprite(canopySpriteMat);
+      right.scale.set(s, s, 1);
       right.position.set(8 + Math.random() * 2, 5.5 + Math.random() * 1.3, z);
       this.courtyardGroup.add(right);
     }
