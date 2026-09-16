@@ -477,8 +477,11 @@ export class RoseScene {
    * rather than a hard-edged geometric cone.
    */
   private createGodrayBeam() {
-    const geom = new THREE.CylinderGeometry(0.45, 2.6, 11.0, 48, 8, true);
-    geom.translate(0, this.flowerHeight + 2.2, 0);
+    // Narrow, tall shaft (widening only slightly toward the top, where it's
+    // far from camera) so it reads as a distant column of light — not a
+    // wide cone whose near, wide end fills the frame at eye level.
+    const geom = new THREE.CylinderGeometry(0.18, 0.55, 13.0, 48, 8, true);
+    geom.translate(0, this.flowerHeight + 4.0, 0);
 
     const vertexShader = `
       varying vec2 vUv;
@@ -507,7 +510,9 @@ export class RoseScene {
         float rim = pow(1.0 - abs(dot(vNormal, vViewDir)), 1.6);
         float shimmer = 0.88 + 0.12 * sin(uTime * 1.3 + vUv.y * 6.0);
         vec3 beamColor = mix(vec3(1.0, 0.9, 0.68), vec3(1.0, 0.78, 0.5), vUv.y);
-        float alpha = vertFade * radialFade * (0.14 + 0.24 * rim) * uIntensity * shimmer;
+        // Much lower base alpha — a light shaft is subtle and translucent,
+        // not a near-opaque wedge covering the frame.
+        float alpha = vertFade * radialFade * (0.05 + 0.09 * rim) * uIntensity * shimmer;
         gl_FragColor = vec4(beamColor, alpha);
       }
     `;
@@ -518,7 +523,7 @@ export class RoseScene {
       uniforms: { uTime: { value: 0 }, uIntensity: { value: 1.0 } },
       transparent: true,
       blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       depthWrite: false,
     });
 
