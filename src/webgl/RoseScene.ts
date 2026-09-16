@@ -3,7 +3,6 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { NAHW_DEMO_TOPICS, NahwDemoTopic } from '../data/nahwTopics';
 
 export type RosePhase = 'sprouting' | 'blooming' | 'exploding' | 'blackout' | 'path';
@@ -108,38 +107,6 @@ function createRealisticPetalGeometry(
 }
 
 /**
- * Procedural Mughal-arch colonnade panel: a sandstone wall slab with a
- * rounded ogee archway cut through it, extruded to a slab depth — the
- * repeating unit that lines the courtyard walkway (reference: the AI
- * garden images' arch colonnade flanking a reflecting pool).
- */
-function createArchPanelGeometry(width: number, height: number): THREE.ExtrudeGeometry {
-  const outer = new THREE.Shape();
-  outer.moveTo(-width / 2, 0);
-  outer.lineTo(width / 2, 0);
-  outer.lineTo(width / 2, height);
-  outer.lineTo(-width / 2, height);
-  outer.lineTo(-width / 2, 0);
-
-  const archWidth = width * 0.6;
-  const springHeight = height * 0.5;
-  const apexHeight = height * 0.92;
-
-  const hole = new THREE.Path();
-  hole.moveTo(-archWidth / 2, 0);
-  hole.lineTo(-archWidth / 2, springHeight);
-  hole.quadraticCurveTo(-archWidth / 2, apexHeight, 0, apexHeight);
-  hole.quadraticCurveTo(archWidth / 2, apexHeight, archWidth / 2, springHeight);
-  hole.lineTo(archWidth / 2, 0);
-  hole.lineTo(-archWidth / 2, 0);
-  outer.holes.push(hole);
-
-  const geom = new THREE.ExtrudeGeometry(outer, { depth: 0.45, bevelEnabled: false, curveSegments: 20 });
-  geom.center();
-  return geom;
-}
-
-/**
  * Small 5-lobed blossom petal (like a cherry/plum blossom petal): rounder
  * and shorter than a rose petal, with a soft heart-notch tip. Mixed into
  * the wind gust alongside rose petals so the storm reads as "rose petals +
@@ -224,7 +191,6 @@ export class RoseScene {
   // Mughal courtyard: reflecting pool + sandstone arch colonnade + rose
   // hedges lining the walkway, matching the reference AI garden images.
   private courtyardGroup: THREE.Group = new THREE.Group();
-  private reflectorPool!: Reflector;
 
   private earthGroup: THREE.Group = new THREE.Group();
   private stemGroup: THREE.Group = new THREE.Group();
@@ -278,7 +244,7 @@ export class RoseScene {
   constructor(container: HTMLElement) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x0a0704, 0.028);
+    this.scene.fog = new THREE.FogExp2(0x030201, 0.035);
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
@@ -293,7 +259,7 @@ export class RoseScene {
     });
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setClearColor(0x0a0704, 1.0);
+    this.renderer.setClearColor(0x030201, 1.0);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
 
@@ -307,7 +273,7 @@ export class RoseScene {
     this.composer.addPass(new OutputPass());
 
     this.setupLighting();
-    this.createMughalCourtyard();
+    this.createVoidStage();
     this.createGodrayBeam();
     this.createSoilAndFallenPetals();
     this.createBotanicalStemAndLeaves();
@@ -346,127 +312,26 @@ export class RoseScene {
   }
 
   /**
-   * Mughal garden courtyard matching the AI reference images: a long
-   * reflecting pool down the central axis, flanked by sandstone arch
-   * colonnades receding into a soft haze, rose hedges lining the walkway,
-   * and a distant domed pavilion closing the vista.
+   * Minimal unseen.co-style dark-void stage: no architecture or garden —
+   * just the rose against near-black space, carried entirely by the
+   * godray beam, rim lighting, and soft ground mist.
    */
-  private createMughalCourtyard() {
+  private createVoidStage() {
+    // Minimal dark-void stage (unseen.co treatment): no architecture, no
+    // garden — just the rose lit by a single dramatic beam against near-
+    // black space. A soft, borderless ground-mist disc (radial-gradient
+    // billboard, not a hard-edged plane) gives the soil a sense of standing
+    // on *something* without introducing any geometric floor silhouette.
     this.courtyardGroup = new THREE.Group();
-    const sandstone = new THREE.MeshStandardMaterial({ color: 0xcbaa78, roughness: 0.82, metalness: 0.03 });
 
-    const floorMat = new THREE.MeshStandardMaterial({ color: 0xa8895e, roughness: 0.88 });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(22, 55), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, -0.02, -18);
-    this.courtyardGroup.add(floor);
-
-    // Reflecting pool: a real mirror surface, matching the reference photos.
-    const poolGeom = new THREE.PlaneGeometry(3.6, 38);
-    this.reflectorPool = new Reflector(poolGeom, {
-      color: 0x8fa89f,
-      textureWidth: 512,
-      textureHeight: 512,
-      clipBias: 0.003,
-    });
-    this.reflectorPool.rotation.x = -Math.PI / 2;
-    this.reflectorPool.position.set(0, 0.01, -19);
-    this.courtyardGroup.add(this.reflectorPool);
-
-    const poolEdgeMat = new THREE.MeshStandardMaterial({ color: 0xd9c39a, roughness: 0.65 });
-    const poolEdge = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.08, 38.3), poolEdgeMat);
-    poolEdge.position.set(0, -0.05, -19);
-    this.courtyardGroup.add(poolEdge);
-
-    // Arch colonnade flanking the walkway, receding softly into fog.
-    const archGeom = createArchPanelGeometry(2.7, 4.6);
-    const archCount = 6;
-    const spacing = 5.8;
-    for (let i = 0; i < archCount; i++) {
-      const z = -2.5 - i * spacing;
-      const left = new THREE.Mesh(archGeom, sandstone);
-      left.position.set(-5.6, 2.3, z);
-      left.rotation.y = Math.PI / 2;
-      this.courtyardGroup.add(left);
-
-      const right = new THREE.Mesh(archGeom, sandstone);
-      right.position.set(5.6, 2.3, z);
-      right.rotation.y = -Math.PI / 2;
-      this.courtyardGroup.add(right);
-    }
-
-    // Rose hedges lining the outer walkway edges: soft billboard sprite
-    // clumps (not faceted geometric spheres) so foliage reads as a soft
-    // photographic blur, with small glowing red-bloom sprites mixed in.
-    const hedgeTexture = createSoftDiscTexture(28, 58, 32, 1);
-    const hedgeSpriteMat = new THREE.SpriteMaterial({ map: hedgeTexture, transparent: true, depthWrite: false });
-    const bloomTexture = createSoftDiscTexture(230, 60, 55, 1);
-    const bloomSpriteMat = new THREE.SpriteMaterial({
-      map: bloomTexture,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      opacity: 0.85,
-    });
-    for (let side = -1; side <= 1; side += 2) {
-      for (let i = 0; i < 14; i++) {
-        const z = -1 - i * 2.4 + (Math.random() - 0.5);
-        const x = side * (2.3 + Math.random() * 0.5);
-
-        const clumpSize = 3 + Math.floor(Math.random() * 2);
-        for (let c = 0; c < clumpSize; c++) {
-          const hedge = new THREE.Sprite(hedgeSpriteMat);
-          const s = 0.6 + Math.random() * 0.35;
-          hedge.scale.set(s, s * 0.85, 1);
-          hedge.position.set(
-            x + (Math.random() - 0.5) * 0.5,
-            0.28 + Math.random() * 0.28,
-            z + (Math.random() - 0.5) * 0.5
-          );
-          this.courtyardGroup.add(hedge);
-        }
-
-        const bloomCount = 3 + Math.floor(Math.random() * 3);
-        for (let b = 0; b < bloomCount; b++) {
-          const bloom = new THREE.Sprite(bloomSpriteMat);
-          const s = 0.14 + Math.random() * 0.08;
-          bloom.scale.set(s, s, 1);
-          bloom.position.set(
-            x + (Math.random() - 0.5) * 0.65,
-            0.45 + Math.random() * 0.35,
-            z + (Math.random() - 0.5) * 0.65
-          );
-          this.courtyardGroup.add(bloom);
-        }
-      }
-    }
-
-    // Distant soft tree canopy above the colonnade: soft billboard sprites
-    // instead of faceted spheres, so the background silhouette blurs
-    // naturally into the haze.
-    const canopyTexture = createSoftDiscTexture(48, 78, 42, 1);
-    const canopySpriteMat = new THREE.SpriteMaterial({ map: canopyTexture, transparent: true, depthWrite: false });
-    for (let i = 0; i < 12; i++) {
-      const z = -4 - i * 4.2;
-      const s = 3.6 + Math.random() * 2.4;
-      const left = new THREE.Sprite(canopySpriteMat);
-      left.scale.set(s, s, 1);
-      left.position.set(-8 - Math.random() * 2, 5.5 + Math.random() * 1.3, z);
-      this.courtyardGroup.add(left);
-      const right = new THREE.Sprite(canopySpriteMat);
-      right.scale.set(s, s, 1);
-      right.position.set(8 + Math.random() * 2, 5.5 + Math.random() * 1.3, z);
-      this.courtyardGroup.add(right);
-    }
-
-    // Far domed pavilion silhouette closing the vista.
-    const domeMat = new THREE.MeshStandardMaterial({ color: 0xe8d2a0, roughness: 0.78 });
-    const domeBase = new THREE.Mesh(new THREE.BoxGeometry(5.4, 3.2, 0.5), domeMat);
-    domeBase.position.set(0, 1.6, -38);
-    this.courtyardGroup.add(domeBase);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.45, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
-    dome.position.set(0, 3.2, -38);
-    this.courtyardGroup.add(dome);
+    const mistTexture = createSoftDiscTexture(20, 14, 10, 1);
+    const groundMist = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: mistTexture, transparent: true, depthWrite: false, opacity: 0.9 })
+    );
+    groundMist.scale.set(9, 9, 1);
+    groundMist.position.set(0, -0.15, 0);
+    groundMist.rotation.z = Math.random() * Math.PI;
+    this.courtyardGroup.add(groundMist);
 
     this.scene.add(this.courtyardGroup);
   }
@@ -1365,7 +1230,6 @@ export class RoseScene {
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('touchmove', this.onTouchMove);
 
-    this.reflectorPool.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {
